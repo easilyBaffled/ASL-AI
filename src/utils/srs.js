@@ -1,11 +1,45 @@
+import { ALL_SIGNS } from '../data/signs.js';
+
+const STORAGE_KEY = 'asl_srs_v1';
+
 export function todayISO(d = new Date()) {
   // yyyy-mm-dd (local midnight)
   const z = new Date(d.getFullYear(), d.getMonth(), d.getDate());
   return z.toISOString().slice(0, 10);
 }
 
+export function loadSrs() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (raw) return JSON.parse(raw);
+  } catch {
+    // ignore
+  }
+  const now = todayISO();
+  const init = {};
+  ALL_SIGNS.forEach(({ id }) => {
+    init[id] = { ease: 2.3, intervalDays: 0, due: now, streak: 0 };
+  });
+  saveSrs(init);
+  return init;
+}
+
+export function saveSrs(srs) {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(srs));
+  } catch {
+    // ignore
+  }
+}
+
 export function isDue(item, onDate = todayISO()) {
   return item && item.due <= onDate;
+}
+
+export function schedule(srs, id, success, startDateISO = todayISO()) {
+  const nextItem = scheduleSim(srs[id], success, startDateISO);
+  srs[id] = nextItem;
+  saveSrs(srs);
 }
 
 export function scheduleSim(item, success, startDateISO) {
