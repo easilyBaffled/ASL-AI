@@ -369,11 +369,17 @@ function useHandsDetector() {
         videoRef.current.srcObject = stream;
         await videoRef.current.play().catch(() => {});
 
+        if (typeof navigator !== 'undefined' && !navigator.onLine) {
+          throw new Error('Network unavailable for hand detector');
+        }
+
         const model = handPoseDetection.SupportedModels.MediaPipeHands;
         const d = await handPoseDetection.createDetector(model, {
           runtime: 'mediapipe',
           modelType: 'lite',
-          solutionPath: 'https://cdn.jsdelivr.net/npm/@mediapipe/hands',
+          solutionPath: import.meta.env.DEV
+            ? '/node_modules/@mediapipe/hands'
+            : '/hands',
         });
         if (stopped) return;
         setDetector(d);
@@ -381,6 +387,7 @@ function useHandsDetector() {
       } catch (e) {
         console.error('Init error', e);
         setErr(e && e.message ? e.message : 'Unknown error');
+        setReady(true); // default to manual practice
         // Keep UI usable without camera/detector
       }
     }
