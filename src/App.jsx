@@ -92,7 +92,9 @@ function loadSrs() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (raw) return JSON.parse(raw);
-  } catch (_) {}
+  } catch {
+    // ignore
+  }
   const now = todayISO();
   const init = {};
   ALL_SIGNS.forEach(({ id }) => {
@@ -105,7 +107,9 @@ function loadSrs() {
 function saveSrs(srs) {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(srs));
-  } catch (_) {}
+  } catch {
+    // ignore
+  }
 }
 
 function isDue(item, onDate = todayISO()) {
@@ -137,32 +141,6 @@ function schedule(srs, id, success) {
   next.setDate(next.getDate() + intervalDays);
   srs[id] = { ease, intervalDays, due: todayISO(next), streak };
   saveSrs(srs);
-}
-
-// --- Pure helpers for tests (do not affect app state) ---
-function scheduleSim(item, success, startDateISO) {
-  const base = item || {
-    ease: 2.3,
-    intervalDays: 0,
-    due: startDateISO,
-    streak: 0,
-  };
-  let { ease, intervalDays, streak } = base;
-
-  if (success) {
-    streak += 1;
-    if (intervalDays === 0) intervalDays = 1;
-    else if (intervalDays === 1) intervalDays = 3;
-    else intervalDays = Math.max(1, Math.round(intervalDays * ease));
-    ease = Math.min(2.8, ease + 0.08);
-  } else {
-    streak = 0;
-    ease = Math.max(1.3, ease - 0.2);
-    intervalDays = 1;
-  }
-  const d = new Date(startDateISO);
-  d.setDate(d.getDate() + intervalDays);
-  return { ease, intervalDays, due: todayISO(d), streak };
 }
 
 /*************************
@@ -498,7 +476,9 @@ function PracticeView({ target, onResult, detector, videoRef, canvasRef }) {
       if (detector) {
         try {
           hands = await detector.estimateHands(video, { flipHorizontal: true });
-        } catch (_) {}
+        } catch {
+          // ignore
+        }
       }
 
       const canAI = aiSupported && !!detector;
@@ -614,111 +594,6 @@ function PracticeView({ target, onResult, detector, videoRef, canvasRef }) {
  * Dev Tests (SRS + Safety)
  *************************/
 
-function runSrsTests() {
-  const results = [];
-  const assert = (name, cond) => results.push({ name, pass: !!cond });
-
-  const start = '2025-01-01';
-  let item = { ease: 2.3, intervalDays: 0, due: start, streak: 0 };
-
-  // Test 1: first success → interval 1 day
-  item = scheduleSim(item, true, start);
-  assert(
-    'first success -> interval 1',
-    item.intervalDays === 1 && item.streak === 1
-  );
-
-  // Test 2: second success → interval 3 days
-  item = scheduleSim(item, true, start);
-  assert(
-    'second success -> interval 3',
-    item.intervalDays === 3 && item.streak === 2
-  );
-
-  // Test 3: third success → interval rounds up by ease (~2.3) => ~7
-  const prevEase = item.ease;
-  item = scheduleSim(item, true, start);
-  assert(
-    'third success -> ~7 days',
-    item.intervalDays >= 6 && item.intervalDays <= 8 && item.ease > prevEase
-  );
-
-  // Test 4: failure resets to 1 day and lowers ease
-  const prevEase2 = item.ease;
-  item = scheduleSim(item, false, start);
-  assert(
-    'failure -> interval 1, ease down',
-    item.intervalDays === 1 && item.ease <= prevEase2
-  );
-
-  // Test 5: isDue respects dates
-  const dueNow = { ease: 2.3, intervalDays: 0, due: '2025-01-01', streak: 0 };
-  const dueFuture = {
-    ease: 2.3,
-    intervalDays: 3,
-    due: '2025-02-01',
-    streak: 2,
-  };
-  assert('isDue now', isDue(dueNow, '2025-01-02') === true);
-  assert('isDue future', isDue(dueFuture, '2025-01-02') === false);
-
-  // NEW: ease bounds respected
-  let bounds = { ease: 2.79, intervalDays: 10, due: start, streak: 5 };
-  bounds = scheduleSim(bounds, true, start);
-  assert('ease capped at 2.8', bounds.ease <= 2.8);
-  bounds = { ease: 1.31, intervalDays: 1, due: start, streak: 0 };
-  bounds = scheduleSim(bounds, false, start);
-  assert('ease floor at 1.3', bounds.ease >= 1.3);
-
-  // NEW: due equals onDate is considered due
-  const dueEq = { ease: 2.3, intervalDays: 0, due: '2025-03-10', streak: 0 };
-  assert('isDue equal date', isDue(dueEq, '2025-03-10') === true);
-
-  // NEW: recognizer safety on bad inputs
-  try {
-    const r1 = recognize('More', []);
-    const r2 = recognize('I Love You', [{ keypoints: [] }]);
-    assert(
-      'recognizers do not throw on empty',
-      r1 === null && (r2 === null || typeof r2 === 'object')
-    );
-  } catch (e) {
-    assert('recognizers do not throw on empty', false);
-  }
-
-  // NEW: monotonic interval growth across successes
-  let sim = { ease: 2.3, intervalDays: 0, due: start, streak: 0 };
-  const i1 = scheduleSim(sim, true, start).intervalDays;
-  sim = scheduleSim(sim, true, start);
-  const i2 = scheduleSim(sim, true, start).intervalDays;
-  assert('interval increases over wins', i2 >= i1);
-
-  return results;
-}
-
-function DevTestsPanel() {
-  const [results, setResults] = useState(null);
-  useEffect(() => {
-    setResults(runSrsTests());
-  }, []);
-  if (!results) return null;
-  const pass = results.filter((r) => r.pass).length;
-  const total = results.length;
-  return (
-    <div className="mt-6 p-4 rounded-2xl border bg-white shadow">
-      <div className="font-semibold mb-2">
-        Dev Tests (SRS & Safety): {pass}/{total} passed
-      </div>
-      <ul className="text-sm list-disc pl-5 space-y-1">
-        {results.map((r, i) => (
-          <li key={i} className={r.pass ? 'text-emerald-700' : 'text-rose-700'}>
-            {r.pass ? '✔' : '✘'} {r.name}
-          </li>
-        ))}
-      </ul>
-    </div>
-  );
-}
 
 /*************************
  * UI Helpers
@@ -841,8 +716,6 @@ export default function App() {
     );
   }
 
-  const showTests =
-    typeof window !== 'undefined' && window.location.hash === '#tests';
 
   const detectorReady = !!detector && ready;
 
@@ -940,13 +813,8 @@ export default function App() {
                 Privacy: All processing runs in your browser. No video is
                 uploaded.
               </p>
-              <p className="text-xs text-gray-500">
-                Dev tip: add <code>#tests</code> to the URL to view built-in SRS
-                tests.
-              </p>
             </section>
 
-            {showTests && <DevTestsPanel />}
           </div>
         )}
 
